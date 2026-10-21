@@ -1,0 +1,61 @@
+# The frontend: it keeps nothing, so it is a Deployment and can have many replicas.
+# Docker equivalent: docker run --name web -p 8080:80 demo-c5-web:v1
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: web
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: web
+  template:
+    metadata:
+      labels:
+        app: web
+    spec:
+      # Prefer the GCP VMs over the nodes at home (soft rule: k3d still works).
+      affinity:
+        nodeAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              preference:
+                matchExpressions:
+                  - key: topology.kubernetes.io/zone
+                    operator: In
+                    values: ["us-central1-a"]
+      containers:
+        - name: web
+          image: us-central1-docker.pkg.dev/project-4c4f803f-f2a7-4566-9fe/demo-c5/web:v1
+          imagePullPolicy: Always   # same tag re-pushed while preparing: always fetch it again
+          ports:
+            - containerPort: 80
+          readinessProbe:
+            httpGet:
+              path: /whoami
+              port: 80
+          # On a rolling update the Service takes a few seconds to stop sending
+          # traffic to the old Pod: it waits before shutting down, no request is lost.
+          lifecycle:
+            preStop:
+              exec:
+                command: ["sleep", "5"]
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+---
+# The -p of docker run. In free-k3s servicelb is off, so EXTERNAL-IP stays <pending>:
+# students come in through the fixed nodePort of any GCP VM (http://<VM-IP>:30080).
+apiVersion: v1
+kind: Service
+metadata:
+  name: web
+spec:
+  type: LoadBalancer
+  selector:
+    app: web
+  ports:
+    - port: 80
+      targetPort: 80
+      nodePort: 30080

@@ -1,0 +1,31 @@
+# The nginx image runs envsubst on this file at startup: ${WEB_VERSION} comes
+# from the environment, $hostname and friends are nginx's own and stay as is.
+server {
+    listen 80;
+
+    # One request, one connection: so each reload can land on a different
+    # replica and the page shows the balancing. Only for the demo.
+    keepalive_timeout 0;
+
+    root /usr/share/nginx/html;
+
+    location / {
+        try_files $uri /index.html;
+    }
+
+    # Who answered on the web side.
+    location = /whoami {
+        default_type application/json;
+        add_header Cache-Control no-store;
+        return 200 '{"host":"$hostname","version":"${WEB_VERSION}"}';
+    }
+
+    # Everything under /api/ goes to the API. "api" is the container name in
+    # Docker and the Service name in Kubernetes: the same file works in both.
+    location /api/ {
+        proxy_pass http://api:8080/;
+        # Tells the API which web replica forwarded the request (claps per Pod).
+        proxy_set_header X-Web-Pod $hostname;
+        add_header Cache-Control no-store;
+    }
+}
