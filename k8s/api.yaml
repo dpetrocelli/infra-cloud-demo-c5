@@ -26,17 +26,6 @@ spec:
       labels:
         app: api
     spec:
-      # Prefer the GCP VMs: the disk is created on the node where the Pod first lands
-      # and stays there. Soft rule, so k3d (without zones) still works.
-      affinity:
-        nodeAffinity:
-          preferredDuringSchedulingIgnoredDuringExecution:
-            - weight: 100
-              preference:
-                matchExpressions:
-                  - key: topology.kubernetes.io/zone
-                    operator: In
-                    values: ["us-central1-a"]
       securityContext:
         fsGroup: 1000  # the app runs as uid 1000: the new disk has to be writable for it
       containers:
@@ -57,12 +46,11 @@ spec:
             - name: data
               mountPath: /data
   # The -v of docker run: Kubernetes asks for the disk (PVC) and the cluster creates it.
-  # The free-k3s cluster has no default StorageClass: without this line the PVC stays Pending.
+  # No storageClassName: the cluster default (standard-rwo in GKE, a Persistent Disk).
   volumeClaimTemplates:
     - metadata:
         name: data
       spec:
-        storageClassName: local-path
         accessModes: ["ReadWriteOnce"]
         resources:
           requests:

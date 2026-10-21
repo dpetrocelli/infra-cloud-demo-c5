@@ -14,28 +14,23 @@ navegador ──► web (nginx :80) ──/api/──► api (FastAPI :8080) ─
 | Frontend sin estado | `docker run -p 8080:80` | Deployment de 3 réplicas + Service |
 | API con estado | `-v demo-c5-datos:/data` | StatefulSet con PVC |
 
-## 0. Variables y acceso al cluster
+## 0. Variables y acceso al cluster (GKE `demo-c5`)
 
 En Git Bash (Windows) o cualquier bash, parado en esta carpeta:
 
 ```bash
-export CLOUDSDK_ACTIVE_CONFIG_NAME=free-k3s AR=us-central1-docker.pkg.dev/project-4c4f803f-f2a7-4566-9fe/demo-c5 KUBECONFIG=~/.kube/free-k3s.yaml
-```
-
-Una sola vez: el kubeconfig del k3s. El certificado del API no incluye la IP pública actual del server, por eso el `--tls-server-name`. El 6443 solo acepta la IP de casa y Tailscale.
-
-```bash
-gcloud compute ssh free-k3s-gcp --zone us-central1-a --command 'sudo cat /etc/rancher/k3s/k3s.yaml' > ~/.kube/free-k3s.yaml
-kubectl config set-cluster default --server=https://35.209.64.40:6443 --tls-server-name=free-k3s-gcp
-kubectl config rename-context default free-k3s
+export CLOUDSDK_ACTIVE_CONFIG_NAME=free-k3s AR=us-central1-docker.pkg.dev/project-4c4f803f-f2a7-4566-9fe/demo-c5
+gcloud container clusters get-credentials demo-c5 --zone us-central1-a
 kubectl get nodes
-```
-
-El namespace de la clase:
-
-```bash
 kubectl create namespace clase5
 kubectl config set-context --current --namespace=clase5
+```
+
+El cluster (una vez; tarda 5-10 min y cuesta mientras existe):
+
+```bash
+gcloud container clusters create demo-c5 --zone us-central1-a --num-nodes 2 --machine-type e2-medium \
+  --disk-type pd-standard --disk-size 30 --release-channel regular --workload-pool=project-4c4f803f-f2a7-4566-9fe.svc.id.goog
 ```
 
 ## 1. Docker local
@@ -65,17 +60,15 @@ docker push $AR/api:v1
 docker push $AR/web:v1
 ```
 
-## 3. Kubernetes (k3s `free-k3s` en GCP, namespace `clase5`)
+## 3. Kubernetes a mano (namespace `clase5`)
 
 ```bash
 kubectl apply -f k8s/
 kubectl get pods,pvc,svc -o wide
+kubectl get svc web -w          # esperar EXTERNAL-IP (1-2 min)
 ```
 
-En otra terminal: `kubectl get pods -w`.
-
-Los alumnos entran a **http://35.209.42.61:30080**, o a cualquier otra VM de GCP del cluster en el puerto 30080.
-El Service es `LoadBalancer`, pero en este k3s `servicelb` está apagado, así que `EXTERNAL-IP` queda `<pending>`: se entra por el `nodePort` fijo 30080. La regla de firewall `demo-c5-allow-web` abre solo ese puerto y solo en las VMs del cluster.
+En otra terminal: `kubectl get pods -w`. Los alumnos entran a `http://<EXTERNAL-IP>/`.
 
 - **Balanceo:** el Pod de `web` cambia de color con cada actualización, y en "Aplausos" se ve cuántos atendió cada una de las 3 réplicas. Después de un rollout, los Pods viejos quedan atenuados.
 - **Se recupera solo:** `kubectl delete pod -l app=web`; vuelven Pods nuevos, con otros nombres.
@@ -88,12 +81,19 @@ El Service es `LoadBalancer`, pero en este k3s `servicelb` está apagado, así q
   ```
   En la página, la versión del frontend pasa a `v2` sin cortes (probado: 0 pedidos fallidos durante el rollout). `kubectl rollout undo deployment/web` vuelve atrás.
 
-### Lo que este cluster tiene de particular (ya resuelto en `k8s/`)
+## 4. El pipeline (`.github/workflows/deploy.yml`)
 
-- **No hay StorageClass default:** sin `storageClassName: local-path` el PVC queda `Pending` (`no storage class is set`).
-- **Hay nodos en casa** (`knode06`, `knode11`, `dp-note`): una afinidad suave lleva los Pods a las VMs de GCP (`us-central1-a`). El disco de `local-path` queda en el nodo donde arrancó `api-0` por primera vez.
-- **`imagePullPolicy: Always`:** si re-subís el mismo tag, el Pod nuevo lo baja de nuevo.
-- En k3d anda igual: la afinidad es "preferida" y `local-path` existe.
+Cada push a `main` construye `api` y `web` con el sha como tag, hace el smoke test (los mismos dos `docker run`), los sube a Artifact Registry y los despliega en GKE con `kubectl apply`. Al final verifica que la página responda con la versión nueva: la tarjeta del front muestra el sha corto.
+
+- **Sin claves:** GitHub se autentica con OIDC como `gke-deployer`, que solo puede subir al repo `demo-c5` y desplegar en el cluster. El provider `github-provider-c5` solo acepta este repo.
+- **Kubernetes:** `get-gke-credentials` le arma el kubeconfig al runner con esas mismas credenciales. No hay kubeconfig guardado en ningún lado.
+- **Pull request:** build y smoke test, nada se publica.
+- Setup (una vez, como Owner): `scripts/setup-pipeline.sh`. Crea la service account, sus roles, el provider OIDC y las variables del repo.
+
+```bash
+gh workflow run deploy                      # o un push a main
+gh run watch
+```
 
 ## Antes de la clase: contadores en cero
 
@@ -104,7 +104,7 @@ kubectl delete statefulset api && kubectl delete pvc data-api-0 && kubectl apply
 ## Limpieza
 
 ```bash
-kubectl delete -f k8s/ && kubectl delete pvc data-api-0      # el PVC no se borra con el StatefulSet
+kubectl delete namespace clase5                                  # Pods, Services, el LoadBalancer y el disco
 docker rm -f web api && docker network rm demo-c5 && docker volume rm demo-c5-datos
-gcloud compute firewall-rules delete demo-c5-allow-web       # cierra el 30080
+gcloud container clusters delete demo-c5 --zone us-central1-a    # el cluster: deja de cobrar
 ```

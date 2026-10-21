@@ -1,0 +1,107 @@
+# The pipeline: build both images -> push to Artifact Registry -> deploy to GKE.
+#   - pull request -> build and smoke test only (nothing is published)
+#   - push to main -> push api:<sha> and web:<sha>, kubectl apply on GKE
+# GCP access: its own service account (gke-deployer) via OIDC, no JSON key.
+# It can push to the demo-c5 repo and deploy to the cluster; nothing else.
+# Kubernetes access: the same OIDC credentials, through get-gke-credentials.
+#
+# Repository variables: GCP_PROJECT_ID, GCP_WORKLOAD_IDENTITY_PROVIDER,
+# GCP_SERVICE_ACCOUNT, GKE_CLUSTER (default demo-c5), GKE_LOCATION
+# (default us-central1-a). No secrets.
+name: deploy
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  AR: us-central1-docker.pkg.dev/${{ vars.GCP_PROJECT_ID }}/demo-c5
+  TAG: ${{ github.sha }}
+  NAMESPACE: clase5
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write # only this job and deploy may ask for an OIDC token
+    steps:
+      - uses: actions/checkout@v4
+
+      # The version shown on the page is the short sha: you see which commit is live.
+      - name: docker build
+        run: |
+          docker build --build-arg "APP_VERSION=${TAG::7}" -t "$AR/api:$TAG" ./api
+          docker build --build-arg "WEB_VERSION=${TAG::7}" -t "$AR/web:$TAG" ./web
+
+      # The same two docker run of the class, on the runner.
+      - name: Smoke test (the app answers through nginx)
+        run: |
+          docker network create smoke
+          docker run -d --name api --network smoke "$AR/api:$TAG"
+          docker run -d --name web --network smoke -p 8080:80 "$AR/web:$TAG"
+          curl -sf --retry 20 --retry-delay 1 --retry-all-errors http://localhost:8080/api/votos
+          docker rm -f web api
+
+      # Pull requests stop here: tested and built, nothing published.
+      - uses: google-github-actions/auth@v2
+        if: github.event_name != 'pull_request'
+        with:
+          workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ vars.GCP_SERVICE_ACCOUNT }}
+
+      - uses: google-github-actions/setup-gcloud@v2
+        if: github.event_name != 'pull_request'
+
+      - name: docker push
+        if: github.event_name != 'pull_request'
+        run: |
+          gcloud auth configure-docker us-central1-docker.pkg.dev --quiet
+          docker push "$AR/api:$TAG"
+          docker push "$AR/web:$TAG"
+
+  deploy:
+    needs: build
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ vars.GCP_SERVICE_ACCOUNT }}
+
+      # Writes a kubeconfig for the runner: from here on, plain kubectl.
+      - uses: google-github-actions/get-gke-credentials@v2
+        with:
+          cluster_name: ${{ vars.GKE_CLUSTER || 'demo-c5' }}
+          location: ${{ vars.GKE_LOCATION || 'us-central1-a' }}
+
+      # The manifests say :v1 (what you apply by hand); the pipeline deploys this commit.
+      - name: kubectl apply (this commit's images)
+        run: |
+          sed -i "s#/api:v1#/api:$TAG#; s#/web:v1#/web:$TAG#" k8s/*.yaml
+          kubectl create namespace "$NAMESPACE" --dry-run=client -o yaml | kubectl apply -f -
+          kubectl -n "$NAMESPACE" apply -f k8s/
+          kubectl -n "$NAMESPACE" rollout status statefulset/api --timeout=300s
+          kubectl -n "$NAMESPACE" rollout status deployment/web --timeout=300s
+
+      - name: Check the new version answers
+        run: |
+          for i in $(seq 30); do
+            IP=$(kubectl -n "$NAMESPACE" get svc web -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
+            [ -n "$IP" ] && break
+            sleep 10
+          done
+          curl -sf --retry 20 --retry-delay 3 --retry-all-errors "http://$IP/whoami" | tee /dev/stderr | grep -q "\"version\":\"${TAG::7}\""
+          echo "::notice::deployed ${TAG::7} at http://$IP/"
+          echo "App: http://$IP/ (version ${TAG::7})" >> "$GITHUB_STEP_SUMMARY"
