@@ -37,7 +37,9 @@ spec:
               memory: 32Mi
 ---
 # The -p of docker run. In GKE, LoadBalancer creates a Google load balancer
-# with a public IP (EXTERNAL-IP, takes 1-2 minutes): http://<EXTERNAL-IP>/
+# with a public IP (EXTERNAL-IP, takes 1-2 minutes).
+# Give the class http://<EXTERNAL-IP>:8080/ : Chrome upgrades plain http on
+# port 80 to https (which this app does not serve), but not on other ports.
 apiVersion: v1
 kind: Service
 metadata:
@@ -47,5 +49,9 @@ spec:
   selector:
     app: web
   ports:
-    - port: 80
+    - name: http
+      port: 80
+      targetPort: 80
+    - name: alt
+      port: 8080
       targetPort: 80

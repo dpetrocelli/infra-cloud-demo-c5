@@ -68,7 +68,7 @@ kubectl get pods,pvc,svc -o wide
 kubectl get svc web -w          # esperar EXTERNAL-IP (1-2 min)
 ```
 
-En otra terminal: `kubectl get pods -w`. Los alumnos entran a `http://<EXTERNAL-IP>/`.
+En otra terminal: `kubectl get pods -w`. Los alumnos entran a `http://<EXTERNAL-IP>:8080/` (con el puerto: sin él, Chrome intenta https y esta app no lo sirve).
 
 - **Balanceo:** el Pod de `web` cambia de color con cada actualización, y en "Aplausos" se ve cuántos atendió cada una de las 3 réplicas. Después de un rollout, los Pods viejos quedan atenuados.
 - **Se recupera solo:** `kubectl delete pod -l app=web`; vuelven Pods nuevos, con otros nombres.

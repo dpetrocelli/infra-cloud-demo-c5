@@ -102,6 +102,6 @@ jobs:
             [ -n "$IP" ] && break
             sleep 10
           done
-          curl -sf --retry 20 --retry-delay 3 --retry-all-errors "http://$IP/whoami" | tee /dev/stderr | grep -q "\"version\":\"${TAG::7}\""
-          echo "::notice::deployed ${TAG::7} at http://$IP/"
-          echo "App: http://$IP/ (version ${TAG::7})" >> "$GITHUB_STEP_SUMMARY"
+          curl -sf --retry 20 --retry-delay 3 --retry-all-errors "http://$IP:8080/whoami" | tee /dev/stderr | grep -q "\"version\":\"${TAG::7}\""
+          echo "::notice::deployed ${TAG::7} at http://$IP:8080/"
+          echo "App: http://$IP:8080/ (version ${TAG::7})" >> "$GITHUB_STEP_SUMMARY"
