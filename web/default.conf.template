@@ -24,6 +24,8 @@ server {
     # Docker and the Service name in Kubernetes: the same file works in both.
     location /api/ {
         proxy_pass http://api:8080/;
+        # If the API is down, fail in 2 s (default 60 s) so the page shows it right away.
+        proxy_connect_timeout 2s;
         # Tells the API which web replica forwarded the request (claps per Pod).
         proxy_set_header X-Web-Pod $hostname;
         add_header Cache-Control no-store;

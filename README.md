@@ -14,10 +14,33 @@ navegador ──► web (nginx :80) ──/api/──► api (FastAPI :8080) ─
 | Frontend sin estado | `docker run -p 8080:80` | Deployment de 3 réplicas + Service |
 | API con estado | `-v demo-c5-datos:/data` | StatefulSet con PVC |
 
+## 0. Variables y acceso al cluster
+
+En Git Bash (Windows) o cualquier bash, parado en esta carpeta:
+
+```bash
+export CLOUDSDK_ACTIVE_CONFIG_NAME=free-k3s AR=us-central1-docker.pkg.dev/project-4c4f803f-f2a7-4566-9fe/demo-c5 KUBECONFIG=~/.kube/free-k3s.yaml
+```
+
+Una sola vez: el kubeconfig del k3s. El certificado del API no incluye la IP pública actual del server, por eso el `--tls-server-name`. El 6443 solo acepta la IP de casa y Tailscale.
+
+```bash
+gcloud compute ssh free-k3s-gcp --zone us-central1-a --command 'sudo cat /etc/rancher/k3s/k3s.yaml' > ~/.kube/free-k3s.yaml
+kubectl config set-cluster default --server=https://35.209.64.40:6443 --tls-server-name=free-k3s-gcp
+kubectl config rename-context default free-k3s
+kubectl get nodes
+```
+
+El namespace de la clase:
+
+```bash
+kubectl create namespace clase5
+kubectl config set-context --current --namespace=clase5
+```
+
 ## 1. Docker local
 
 ```bash
-cd demo-c5
 docker build -t demo-c5-api:v1 api
 docker build -t demo-c5-web:v1 web
 docker network create demo-c5
@@ -36,14 +59,13 @@ Abrir http://localhost:8080, votar y aplaudir.
 Repo `demo-c5` (us-central1), con lectura pública: el cluster baja las imágenes sin credenciales.
 
 ```bash
-AR=us-central1-docker.pkg.dev/project-4c4f803f-f2a7-4566-9fe/demo-c5
 docker tag demo-c5-api:v1 $AR/api:v1
 docker tag demo-c5-web:v1 $AR/web:v1
 docker push $AR/api:v1
 docker push $AR/web:v1
 ```
 
-## 3. Kubernetes (k3s `free-k3s` en GCP, namespace `ensayo-c5`)
+## 3. Kubernetes (k3s `free-k3s` en GCP, namespace `clase5`)
 
 ```bash
 kubectl apply -f k8s/
