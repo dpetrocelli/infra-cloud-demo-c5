@@ -140,8 +140,9 @@
     $(side + "-ver").textContent = data ? data.version : "-";
   }
 
+  // Give up after 4 s: while Pods restart a request can hang, and the page must keep refreshing.
   async function getJSON(url) {
-    const r = await fetch(url, { cache: "no-store" });
+    const r = await fetch(url, { cache: "no-store", signal: AbortSignal.timeout(4000) });
     if (!r.ok) throw new Error(r.status);
     return r.json();
   }
