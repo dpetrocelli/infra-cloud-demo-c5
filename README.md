@@ -19,7 +19,7 @@ navegador ──► web (nginx :80) ──/api/──► api (FastAPI :8080) ─
 En Git Bash (Windows) o cualquier bash, parado en esta carpeta:
 
 ```bash
-export CLOUDSDK_ACTIVE_CONFIG_NAME=free-k3s AR=us-central1-docker.pkg.dev/project-4c4f803f-f2a7-4566-9fe/demo-c5
+export CLOUDSDK_CORE_PROJECT=project-4c4f803f-f2a7-4566-9fe AR=us-central1-docker.pkg.dev/project-4c4f803f-f2a7-4566-9fe/demo-c5
 gcloud container clusters get-credentials demo-c5 --zone us-central1-a
 kubectl get nodes
 kubectl create namespace clase5

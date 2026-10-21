@@ -5,7 +5,7 @@
 # key), and sets the repository variables the workflow reads.
 set -euo pipefail
 
-export CLOUDSDK_ACTIVE_CONFIG_NAME=free-k3s
+export CLOUDSDK_CORE_PROJECT=project-4c4f803f-f2a7-4566-9fe
 PROJECT_ID=project-4c4f803f-f2a7-4566-9fe
 PROJECT_NUMBER=158566931151
 REPO=dpetrocelli/infra-cloud-demo-c5
