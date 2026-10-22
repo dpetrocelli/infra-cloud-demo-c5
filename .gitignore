@@ -1,2 +1,3 @@
 api/data/
 __pycache__/
+.env

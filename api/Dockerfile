@@ -14,11 +14,10 @@ COPY main.py .
 # Shown on the page: change it at build time to see a rolling update. Declared after
 # pip on purpose: a new version must not invalidate the dependency layer.
 ARG APP_VERSION=v1
-ENV APP_VERSION=${APP_VERSION} DATA_DIR=/data
+ENV APP_VERSION=${APP_VERSION}
 
-# Not root. /data is created owned by the app user, so a named volume mounted
-# there inherits that owner.
-RUN useradd --uid 1000 --create-home app && mkdir -p /data && chown app /data
+# Not root. The API keeps nothing on disk: the data lives in Postgres.
+RUN useradd --uid 1000 --create-home app
 USER app
 
 EXPOSE 8080

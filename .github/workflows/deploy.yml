@@ -39,14 +39,20 @@ jobs:
           docker build --build-arg "APP_VERSION=${TAG::7}" -t "$AR/api:$TAG" ./api
           docker build --build-arg "WEB_VERSION=${TAG::7}" -t "$AR/web:$TAG" ./web
 
-      # The same two docker run of the class, on the runner.
-      - name: Smoke test (the app answers through nginx)
+      # The three pieces of the compose file, on the runner: db, api and web.
+      - name: Smoke test (the app answers through nginx and reaches the database)
         run: |
+          # A throwaway password for this run only: nothing fixed in the repo.
+          PGPASSWORD=$(openssl rand -hex 16)
+          echo "::add-mask::$PGPASSWORD"
           docker network create smoke
-          docker run -d --name api --network smoke "$AR/api:$TAG"
+          docker run -d --name db --network smoke             -e POSTGRES_DB=demo -e POSTGRES_USER=demo -e POSTGRES_PASSWORD="$PGPASSWORD" postgres:16-alpine
+          docker run -d --name api --network smoke             -e PGHOST=db -e PGDATABASE=demo -e PGUSER=demo -e PGPASSWORD="$PGPASSWORD" "$AR/api:$TAG"
           docker run -d --name web --network smoke -p 8080:80 "$AR/web:$TAG"
-          curl -sf --retry 20 --retry-delay 1 --retry-all-errors http://localhost:8080/api/votos
-          docker rm -f web api
+          curl -sf --retry 30 --retry-delay 1 --retry-all-errors http://localhost:8080/api/healthz
+          curl -sf -X POST http://localhost:8080/api/votos/re-bien
+          curl -sf http://localhost:8080/api/votos | grep -q '"re-bien":1'
+          docker rm -f web api db
 
       # Pull requests stop here: tested and built, nothing published.
       - uses: google-github-actions/auth@v2
@@ -92,7 +98,7 @@ jobs:
           sed -i "s#/api:v1#/api:$TAG#; s#/web:v1#/web:$TAG#" k8s/*.yaml
           kubectl create namespace "$NAMESPACE" --dry-run=client -o yaml | kubectl apply -f -
           kubectl -n "$NAMESPACE" apply -f k8s/
-          kubectl -n "$NAMESPACE" rollout status statefulset/api --timeout=300s
+          kubectl -n "$NAMESPACE" rollout status deployment/api --timeout=300s
           kubectl -n "$NAMESPACE" rollout status deployment/web --timeout=300s
 
       - name: Check the new version answers

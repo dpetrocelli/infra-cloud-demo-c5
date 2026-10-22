@@ -1,0 +1,46 @@
+# The whole stack with one command: docker compose up -d --build
+# Same three pieces as in Kubernetes: web (nginx) -> api (FastAPI) -> db (Postgres).
+# Compose puts them on one network where each service is reachable by its name:
+# nginx already proxies to "api", and the API connects to "db".
+#
+# Credentials: nothing is written here. They come from the .env file next to this one
+# (not in Git): cp .env.example .env and set a password.
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-demo}
+      POSTGRES_USER: ${POSTGRES_USER:?copy .env.example to .env and fill it in}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?copy .env.example to .env and fill it in}
+    volumes:
+      - datos:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 2s
+      retries: 30
+    # No "ports": only the API, inside the compose network, reaches the database.
+
+  api:
+    build: api
+    image: demo-c5-api:v1
+    environment:
+      PGHOST: db
+      PGDATABASE: ${POSTGRES_DB:-demo}
+      PGUSER: ${POSTGRES_USER}
+      PGPASSWORD: ${POSTGRES_PASSWORD}
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:8000:8080"   # only this machine, to open Swagger (http://localhost:8000/docs)
+
+  web:
+    build: web
+    image: demo-c5-web:v1
+    depends_on:
+      - api
+    ports:
+      - "8080:80"
+
+volumes:
+  datos:

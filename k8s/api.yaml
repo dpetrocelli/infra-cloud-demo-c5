@@ -1,5 +1,24 @@
-# The API: it keeps the items on disk, so it is a StatefulSet with its own volume.
-# Docker equivalent: docker run --name api -v demo-c5-datos:/data demo-c5-api:v1
+# The API: it keeps nothing on its own (the data lives in Cloud SQL), so it is a
+# Deployment and can have many replicas, like the frontend.
+# Docker equivalent: the "api" service of docker-compose.yml (there the database is a
+# Postgres container; here it is a managed Cloud SQL instance, the API does not notice).
+#
+# How the API reaches Cloud SQL: each Pod carries the Cloud SQL Auth Proxy next to the
+# API. The API connects to 127.0.0.1:5432 as if Postgres were local; the proxy opens an
+# encrypted connection to the instance, authenticated as the GCP service account
+# api-cloudsql (Workload Identity: no JSON key). No database IP is open to the world.
+#
+# The database password is in the Secret "db" (keys: username, password). It is NOT
+# in Git: it is created once by scripts/setup-cloudsql.sh, and the pipeline's
+# kubectl apply never touches it.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: api
+  annotations:
+    # Workload Identity: the Pods of this ServiceAccount act as this GCP service account.
+    iam.gke.io/gcp-service-account: api-cloudsql@project-4c4f803f-f2a7-4566-9fe.iam.gserviceaccount.com
+---
 apiVersion: v1
 kind: Service
 metadata:
@@ -12,12 +31,11 @@ spec:
       targetPort: 8080
 ---
 apiVersion: apps/v1
-kind: StatefulSet
+kind: Deployment
 metadata:
   name: api
 spec:
-  serviceName: api
-  replicas: 1          # one disk, one list: with 2 replicas each one would have its own disk
+  replicas: 2
   selector:
     matchLabels:
       app: api
@@ -26,32 +44,56 @@ spec:
       labels:
         app: api
     spec:
-      securityContext:
-        fsGroup: 1000  # the app runs as uid 1000: the new disk has to be writable for it
+      serviceAccountName: api
+      # The proxy as a native sidecar: it starts before the API and stops after it.
+      initContainers:
+        - name: cloud-sql-proxy
+          image: gcr.io/cloud-sql-connectors/cloud-sql-proxy:2.14.1
+          restartPolicy: Always
+          args:
+            - --structured-logs
+            - --port=5432
+            - project-4c4f803f-f2a7-4566-9fe:us-central1:demo-c5-db
+          securityContext:
+            runAsNonRoot: true
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
       containers:
         - name: api
           image: us-central1-docker.pkg.dev/project-4c4f803f-f2a7-4566-9fe/demo-c5/api:v1
           imagePullPolicy: Always   # same tag re-pushed while preparing: always fetch it again
           ports:
             - containerPort: 8080
+          env:
+            # The standard Postgres variables. The host is the proxy, inside the same Pod.
+            - name: PGHOST
+              value: 127.0.0.1
+            - name: PGDATABASE
+              value: demo
+            - name: PGUSER
+              valueFrom:
+                secretKeyRef:
+                  name: db
+                  key: username
+            - name: PGPASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: db
+                  key: password
+          # /healthz checks the database: the Pod only receives traffic when it can reach it.
           readinessProbe:
             httpGet:
               path: /healthz
               port: 8080
+          # Same as web: a Pod being replaced keeps receiving requests for a few seconds,
+          # so it waits before shutting down. Without it a rollout restart lost 8 of 74.
+          lifecycle:
+            preStop:
+              exec:
+                command: ["sleep", "10"]
           resources:
             requests:
               cpu: 50m
               memory: 128Mi
-          volumeMounts:
-            - name: data
-              mountPath: /data
-  # The -v of docker run: Kubernetes asks for the disk (PVC) and the cluster creates it.
-  # No storageClassName: the cluster default (standard-rwo in GKE, a Persistent Disk).
-  volumeClaimTemplates:
-    - metadata:
-        name: data
-      spec:
-        accessModes: ["ReadWriteOnce"]
-        resources:
-          requests:
-            storage: 1Gi
