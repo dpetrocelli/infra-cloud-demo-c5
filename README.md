@@ -54,8 +54,8 @@ Abrir http://localhost:8080, votar y aplaudir. Swagger de la API (sola): http://
 - **La base:** los votos están en Postgres. `docker compose exec db psql -U demo -c "select * from votos"`.
 - **El volumen:** `docker compose down` y `docker compose up -d`: los votos siguen ahí (`down -v` los borra).
 - **Orden de arranque:** la API espera a que la base responda (`depends_on` con healthcheck, y reintenta al arrancar).
-- **Nadie lo levanta:** `docker compose kill api` y la API queda caída hasta que alguien la arranque (`docker compose up -d`).
-- **La IP cambia:** si al recrear `api` la página muestra "La API no responde", nginx resolvió `api` al arrancar y la IP cambió. Se arregla con `docker compose restart web`. En Kubernetes no pasa: el Service tiene una IP fija.
+- **Nadie lo levanta:** `docker compose kill api` y la tarjeta de la API pasa a "sin respuesta" hasta que alguien la arranque (`docker compose up -d`).
+- **Si la página dice "sin respuesta" con la API levantada:** nginx puede tener la IP vieja de `api` (la resuelve al arrancar): `docker compose restart web`. En Kubernetes no pasa: el Service tiene una IP fija.
 
 ## 2. Push a Artifact Registry
 
